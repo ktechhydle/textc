@@ -2,13 +2,19 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     fs,
-    ops::Index,
 };
+
+#[derive(Serialize, Deserialize, Debug)]
+enum Contents {
+    U8(Vec<u8>),
+    U16(Vec<u16>),
+    U32(Vec<u32>),
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 struct TextFile {
     dictionary: Vec<String>,
-    contents: Vec<u16>,
+    contents: Contents,
 }
 
 // Compresses `text` into a binary Vec
@@ -18,7 +24,7 @@ fn compress(text: &str) -> Vec<u8> {
 
     for c in text.chars() {
         match c {
-            ' ' | '\n' => {
+            ' ' | '\t' | '\n' => {
                 if !current.is_empty() {
                     split_text.push(current.clone());
                     current.clear();
@@ -38,22 +44,24 @@ fn compress(text: &str) -> Vec<u8> {
     datas.retain(|x| seen.insert(x.to_owned()));
 
     let mut dictionary: Vec<String> = Vec::new();
-    let mut map: HashMap<String, u16> = HashMap::new();
-    let mut contents: Vec<u16> = Vec::new();
+    let mut map: HashMap<String, u32> = HashMap::new();
 
     // build dictionary + hashmap
     for data in datas.iter() {
-        let id = dictionary.len() as u16;
+        let id = dictionary.len() as u32;
         dictionary.push(data.to_string());
         map.insert(data.to_string(), id);
     }
 
-    // encode contents
-    for data in split_text.iter() {
-        if let Some(&id) = map.get(data) {
-            contents.push(id);
-        }
-    }
+    let dict_len = dictionary.len();
+
+    let contents = if dict_len <= u8::MAX as usize {
+        Contents::U8(split_text.iter().map(|data| map[data] as u8).collect())
+    } else if dict_len <= u16::MAX as usize {
+        Contents::U16(split_text.iter().map(|data| map[data] as u16).collect())
+    } else {
+        Contents::U32(split_text.iter().map(|data| map[data]).collect())
+    };
 
     let text_file = TextFile {
         dictionary: dictionary,
@@ -87,9 +95,22 @@ fn decompress(data: Vec<u8>) -> String {
 
     let mut reconstructed = String::new();
 
-    for &data in contents.iter() {
-        let text = dictionary.index(data as usize);
-        reconstructed.push_str(&text);
+    match contents {
+        Contents::U8(vec) => {
+            for id in vec {
+                reconstructed.push_str(&dictionary[id as usize]);
+            }
+        }
+        Contents::U16(vec) => {
+            for id in vec {
+                reconstructed.push_str(&dictionary[id as usize]);
+            }
+        }
+        Contents::U32(vec) => {
+            for id in vec {
+                reconstructed.push_str(&dictionary[id as usize]);
+            }
+        }
     }
 
     reconstructed
