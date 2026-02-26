@@ -2,22 +2,13 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     fs,
+    ops::Index,
 };
 
 #[derive(Serialize, Deserialize, Debug)]
-struct WordMap {
-    data: HashMap<String, u16>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct Contents {
-    data: Vec<u16>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
 struct TextFile {
-    word_map: WordMap,
-    contents: Contents,
+    dictionary: Vec<String>,
+    contents: Vec<u16>,
 }
 
 // Compresses `text` into a binary Vec
@@ -46,33 +37,33 @@ fn compress(text: &str) -> Vec<u8> {
     let mut seen = HashSet::new();
     datas.retain(|x| seen.insert(x.to_owned()));
 
-    let mut word_map = WordMap {
-        data: HashMap::new(),
-    };
-    let mut contents = Contents { data: Vec::new() };
+    let mut dictionary: Vec<String> = Vec::new();
+    let mut map: HashMap<String, u16> = HashMap::new();
+    let mut contents: Vec<u16> = Vec::new();
 
-    // create a unique id for each split chunk of text
-    for (i, data) in datas.iter().enumerate() {
-        word_map.data.insert(data.to_string(), i as u16);
+    // build dictionary + hashmap
+    for data in datas.iter() {
+        let id = dictionary.len() as u16;
+        dictionary.push(data.to_string());
+        map.insert(data.to_string(), id);
     }
 
+    // encode contents
     for data in split_text.iter() {
-        let id = match word_map.data.get(data) {
-            Some(&id) => id,
-            None => 0,
-        };
-        contents.data.push(id);
+        if let Some(&id) = map.get(data) {
+            contents.push(id);
+        }
     }
 
     let text_file = TextFile {
-        word_map: word_map,
+        dictionary: dictionary,
         contents: contents,
     };
 
     let bytes = match bincode::serialize(&text_file) {
         Ok(j) => j,
         Err(e) => {
-            println!("ERROR CREATING JSON DATA: {e}");
+            println!("ERROR SERIALIZING DATA: {e}");
 
             Vec::new()
         }
@@ -91,19 +82,14 @@ fn decompress(data: Vec<u8>) -> String {
             return "".to_string();
         }
     };
-    let word_map_reversed: HashMap<u16, String> = text_file
-        .word_map
-        .data
-        .iter()
-        .map(|(k, v)| (v.clone(), k.clone()))
-        .collect();
-    let contents_data = text_file.contents.data;
+    let dictionary = text_file.dictionary;
+    let contents = text_file.contents;
 
     let mut reconstructed = String::new();
 
-    for data in contents_data.iter() {
-        let text = word_map_reversed.get(data).unwrap();
-        reconstructed.push_str(text);
+    for &data in contents.iter() {
+        let text = dictionary.index(data as usize);
+        reconstructed.push_str(&text);
     }
 
     reconstructed
