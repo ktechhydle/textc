@@ -41,13 +41,14 @@ fn find_most_common_sequence(text: &str, length: usize) -> Option<(String, usize
 }
 
 fn tokenize(text: &str) -> (String, Vec<String>) {
-    let longest_word = text
-        .split_whitespace()
-        .max_by_key(|word| word.len())
-        .unwrap();
-    let seq = find_most_common_sequence(text, longest_word.len())
-        .unwrap()
-        .0;
+    let longest_word = match text.split_whitespace().max_by_key(|word| word.len()) {
+        Some(t) => t,
+        None => "",
+    };
+    let seq = match find_most_common_sequence(text, longest_word.len()) {
+        Some(t) => t.0,
+        None => " ".to_string(),
+    };
     let tokens = text.split(&seq).map(|s| s.to_string()).collect();
 
     (seq, tokens)
