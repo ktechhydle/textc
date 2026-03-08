@@ -13,32 +13,49 @@ enum Contents {
 
 #[derive(Serialize, Deserialize, Debug)]
 struct TextFile {
+    sequence: String,
     dictionary: Vec<String>,
     contents: Contents,
 }
 
-// Compresses `text` into a binary Vec
-fn compress(text: &str) -> Vec<u8> {
-    let mut split_text: Vec<String> = Vec::new();
-    let mut current = String::new();
+fn find_most_common_sequence(text: &str, length: usize) -> Option<(String, usize)> {
+    if length == 0 || length > text.len() {
+        return None;
+    }
 
-    for c in text.chars() {
-        match c {
-            ' ' | '\t' | '\n' => {
-                if !current.is_empty() {
-                    split_text.push(current.clone());
-                    current.clear();
-                }
-                split_text.push(c.to_string());
-            }
-            _ => current.push(c),
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    let mut max_count = 0;
+    let mut most_common_seq: Option<String> = None;
+
+    for i in 0..=text.len() - length {
+        let sequence = text.get(i..i + length)?;
+        let count = counts.entry(sequence).and_modify(|c| *c += 1).or_insert(1);
+
+        if *count > max_count {
+            max_count = *count;
+            most_common_seq = Some(sequence.to_string());
         }
     }
 
-    if !current.is_empty() {
-        split_text.push(current);
-    }
+    most_common_seq.map(|seq| (seq, max_count))
+}
 
+fn tokenize(text: &str) -> (String, Vec<String>) {
+    let longest_word = text
+        .split_whitespace()
+        .max_by_key(|word| word.len())
+        .unwrap();
+    let seq = find_most_common_sequence(text, longest_word.len())
+        .unwrap()
+        .0;
+    let tokens = text.split(&seq).map(|s| s.to_string()).collect();
+
+    (seq, tokens)
+}
+
+// Compresses `text` into a binary Vec
+fn compress(text: &str) -> Vec<u8> {
+    let (sequence, split_text) = tokenize(&text);
     let mut datas = split_text.clone();
     let mut seen = HashSet::new();
     datas.retain(|x| seen.insert(x.to_owned()));
@@ -50,7 +67,7 @@ fn compress(text: &str) -> Vec<u8> {
     for data in datas.iter() {
         let id = dictionary.len() as u32;
         dictionary.push(data.to_string());
-        map.insert(data.to_string(), id);
+        map.insert(data.to_owned(), id);
     }
 
     let dict_len = dictionary.len();
@@ -64,8 +81,9 @@ fn compress(text: &str) -> Vec<u8> {
     };
 
     let text_file = TextFile {
-        dictionary: dictionary,
-        contents: contents,
+        sequence,
+        dictionary,
+        contents,
     };
 
     let bytes = match bincode::serialize(&text_file) {
@@ -82,38 +100,32 @@ fn compress(text: &str) -> Vec<u8> {
 
 // Decompresses `data` into a String
 fn decompress(data: Vec<u8>) -> String {
-    let text_file: TextFile = match bincode::deserialize(&data) {
-        Ok(j) => j,
-        Err(e) => {
-            println!("ERROR CREATING JSON DATA: {e}");
-
-            return "".to_string();
-        }
-    };
+    let text_file: TextFile = bincode::deserialize(&data).expect("ERROR DESERIALIZING DATA");
+    let sequence = text_file.sequence;
     let dictionary = text_file.dictionary;
     let contents = text_file.contents;
 
-    let mut reconstructed = String::new();
+    let mut parts = Vec::new();
 
     match contents {
         Contents::U8(vec) => {
             for id in vec {
-                reconstructed.push_str(&dictionary[id as usize]);
+                parts.push(dictionary[id as usize].clone());
             }
         }
         Contents::U16(vec) => {
             for id in vec {
-                reconstructed.push_str(&dictionary[id as usize]);
+                parts.push(dictionary[id as usize].clone());
             }
         }
         Contents::U32(vec) => {
             for id in vec {
-                reconstructed.push_str(&dictionary[id as usize]);
+                parts.push(dictionary[id as usize].clone());
             }
         }
     }
 
-    reconstructed
+    parts.join(&sequence)
 }
 
 pub fn read_and_compress(file: &str, output_name: &str) {
@@ -128,7 +140,12 @@ pub fn read_and_compress(file: &str, output_name: &str) {
             return;
         }
     };
+
+    println!("Original Size: {} bytes", text.len());
+
     let data = compress(&text);
+
+    println!("Compressed Size: {} bytes", data.len());
 
     match fs::write(output_name, data) {
         Ok(_) => {}
@@ -159,4 +176,15 @@ pub fn read_and_decompress(file: &str, output_name: &str) {
             return;
         }
     }
+}
+
+#[test]
+fn test_data_accuracy() {
+    read_and_compress("tests/input.txt", "tests/output");
+    read_and_decompress("tests/output.tzp", "tests/og_input.txt");
+
+    let starting_data = fs::read_to_string("tests/input.txt").unwrap();
+    let og_data_from_compression = fs::read_to_string("tests/og_input.txt").unwrap();
+
+    assert_eq!(&starting_data, &og_data_from_compression);
 }
